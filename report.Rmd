@@ -30,7 +30,7 @@ The [data used](https://divvy-tripdata.s3.amazonaws.com/index.html) is historica
 #   do.call(rbind, .)
 
 #alternatively use vroom for fast creation of a tibble with same purpose as above
-all_trips2021 <- vroom(list.files(pattern = "*.csv"))
+all_trips2021 <- vroom(list.files(pattern = "*.csv", recursive = TRUE))
 glimpse(all_trips2021)
 ```
 The data types for every column seem good, so we will go on to the next step, which is to remove a few columns regarding customer privacy. 
