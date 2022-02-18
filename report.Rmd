@@ -1,0 +1,176 @@
+---
+title: "Case Study 1"
+author: "Alex"
+date: "2/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+install.packages(c("tidyverse", "vroom"), repos = "http://cran.us.r-project.org")
+library(tidyverse)
+library(vroom)
+library(lubridate)
+```
+## Introduction
+
+Cyclistic, a fictional bike-sharing company in Chicago wants to know in what ways do members and casual riders use Divvy bikes differently? Members being defined as users who have bought an annual subscription and casuals as those who buy single rides or day passes. 
+
+## 1. Importing and Wrangling the Dataset
+
+The [data used](https://divvy-tripdata.s3.amazonaws.com/index.html) is historical data of Cyclistic Inc.. The data has been made publicly available by Motivate International Inc. under this [license.](https://ride.divvybikes.com/data-license-agreement) 
+
+
+```{r divvy}
+#set working directory with the csvs first
+#example:
+#setwd("C:/Users/Alex/Documents/Data Analysis/Case Studies/CS1 Data")
+#create a single dataframe by combining the csvs
+# all_trips2021 <- list.files(pattern = "*.csv") %>% 
+#   lapply(., read.csv, header = TRUE) %>% 
+#   do.call(rbind, .)
+
+#alternatively use vroom for fast creation of a tibble with same purpose as above
+all_trips2021 <- vroom(list.files(pattern = "*.csv"))
+glimpse(all_trips2021)
+```
+The data types for every column seem good, so we will go on to the next step, which is to remove a few columns regarding customer privacy. 
+
+``` {r}
+#Remove unnecessary columns (geospatial data columns)
+all_trips2021 <- select(all_trips2021, -c(start_lat, start_lng, end_lat, end_lng))
+```
+
+Now we can rename a few columns for more clarity and consistency. Afterwards we'll be ready for data cleaning. 
+```{r}
+all_trips2021 <- rename(all_trips2021
+                        ,trip_id = ride_id
+                        ,bikeid = rideable_type
+                        ,start_time = started_at
+                        ,end_time = ended_at
+                        ,from_station_name = start_station_name
+                        ,from_station_id = start_station_id
+                        ,to_station_name = end_station_name
+                        ,to_station_id = end_station_id
+                        ,usertype = member_casual)
+                      
+```
+
+## 2. Data Cleaning
+
+Now that the data has been shaped into a cleaner format, it is time to clean the data to prepare for analysis. We will start by getting a quick overview of the data frame with the glimpse() function.
+
+```{r}
+glimpse(all_trips2021)
+```
+
+Some quick observations: There are some null values in the from/to station_name and station_id columns. The usertype column also seems to only have two values; "member" and "casual". Let's confirm this while also counting how many occurrences of each there are.
+
+```{r}
+table(all_trips2021$usertype)
+```
+
+With that out of the way, let's proceed with cleanup and prep. One statistic that would be useful is a trip duration, so we will create a column. We will also make sure nothing weird is happening by checking for negative trip durations and removing any. Because we are transforming the data, we will create a new data frame.
+
+```{r new frame}
+all_trips2021v2 <-  mutate(all_trips2021, tripduration = end_time - start_time) %>% 
+  filter(tripduration > 0)
+#set "tripduration" to a numeric class so we can run calculations
+all_trips2021v2$tripduration <- as.numeric(all_trips2021v2$tripduration)
+```
+
+We also want to add columns to aggregate data for each month, day (and weekdays), or year. 
+
+```{r dates}
+all_trips2021v2$date <- as.Date(all_trips2021v2$start_time) #The default format is yyyy-mm-dd
+all_trips2021v2$month <- format(as.Date(all_trips2021v2$date), "%m")
+all_trips2021v2$day <- format(as.Date(all_trips2021v2$date), "%d")
+all_trips2021v2$year <- format(as.Date(all_trips2021v2$date), "%Y")
+all_trips2021v2$day_of_week <- format(as.Date(all_trips2021v2$date), "%A")
+```
+
+## 3. Descriptive Analysis
+
+We want to answer the question: "In what ways do members and casuals use Divvy bikes?"
+A summary() function shows basic summary statistics, but it is quickly noticed that most variables don't provide much info.
+
+```{r analysis1}
+summary(all_trips2021v2)
+```
+The only variable that is informative is tripduration so we will focus on that.
+
+```{r}
+summary(all_trips2021v2$tripduration)
+```
+On average, users use Divvy bikes for 1316 seconds or approximately 22 minutes at a time. The median is 12 minutes, indicating some skew. Skew is not the main focus of this task, but it is nevertheless an interesting statistic. We will move on to analyzing further into the differences between members and casual users.
+
+```{r summary}
+aggregate(all_trips2021v2$tripduration/60 ~ all_trips2021v2$usertype, FUN = mean)
+aggregate(all_trips2021v2$tripduration/60 ~ all_trips2021v2$usertype, FUN = median)
+aggregate(all_trips2021v2$tripduration/60 ~ all_trips2021v2$usertype, FUN = max)
+aggregate(all_trips2021v2$tripduration ~ all_trips2021v2$usertype, FUN = min)
+```
+We can see that casual users tend to ride for longer than members. Casual users average 32 minutes per trip and members average 13.6 minutes per trip; more than double. One explanation could be that members are city residents who use the bikes to commute to work or school and back. Meanwhile, casuals might be tourists exploring the city, thus using the bikes for longer.
+
+We can delve deeper by analyzing bike usage by day of the week. We will first reorder the days of the week then analyze.
+
+```{r summary2}
+all_trips2021v2$day_of_week <- ordered(all_trips2021v2$day_of_week,levels=c("Sunday",  "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+aggregate(all_trips2021v2$tripduration/60 ~ all_trips2021v2$usertype + all_trips2021v2$day_of_week, FUN = mean)
+```
+
+Next we will combine the previous analyses to group the rider types, days of the week, number of rides and the average duration per ride. To make it more accessible for multiple analyses we will also assign it to a new object labeled trips_summaries. (not necessary but looks neater)
+
+```{r summary3}
+trips_summaries <- all_trips2021v2 %>% 
+  mutate(weekday = wday(start_time, label = TRUE)) %>%  #creates weekday field using wday()
+  group_by(usertype, weekday) %>%  #groups by usertype and weekday
+  summarise(number_of_rides = n()							#calculates the number of rides and average duration 
+            ,average_duration = mean(tripduration)/60) %>% # calculates the average duration
+  arrange(usertype, weekday)							
+```
+
+## 4. Visualizing the Data
+
+Everything done so far has been done with some programming and numbers. It can be hard to fully grasp the outputs and their meanings, so next up we will make visuals so that the information can be easily understood within a few seconds. 
+
+```{r visualization1}
+trips_summaries %>% 
+  ggplot(aes(x = weekday, y = average_duration, fill = usertype)) +
+  geom_col(position = 'dodge') +
+  labs(title = "Average Trip Duration by Weekday") +
+  xlab("Day of the Week") +
+  ylab("Average Trip Duration (minutes)")
+```
+
+```{r visualization2}
+options(scipen = 999) #no scientific notation for # of rides label
+trips_summaries %>% 
+  ggplot(aes(x = weekday, y = number_of_rides/1000, fill = usertype)) +
+  geom_col(position = "dodge") +
+  labs(title = "Number of Rides by Weekday (thousands)") +
+  xlab("Day of the Week") +
+  ylab("Total rides")
+```
+
+If we only looked at the first graphic, we might incorrectly assume that casual riders make up most of the customer base, but we know from a previous count that there are more members' rides than casuals' rides. The second graphic highlights this; we see that during the weekdays (Monday through Friday), there are more rides by members than casuals. Starting on Friday, we notice that there is a significant increase in the number of casual rides, surpassing member usage on Saturdays and Sundays.
+
+These observations strengthen our hypothesis that members are more likely to use these bikes for commuting meanwhile casuals are more likely to use the bikes for leisure activities. 
+
+## 5. Summary and Recommendations
+
+To answer the question "In what ways do members and casual riders use Divvy bikes differently?":
+
+1. Members are most likely using bikes for commuting vs. casuals using for leisure activities like tours.
+2. Casual riders ride on average, 32 minutes per trip which is 2.35x more than the 13.6 minutes per trip      of members.
+3. Bike trips by members outnumber trips by casuals during the weekdays and are outnumbered by casuals on     weekends.
+4. Peak ridership occurs on Saturday, followed by Sunday then Friday, for both members and casuals. 
+5. Members rent bikes more consistently throughout the week and slightly less on weekends.
+
+Some business suggestions to make use of this information:
+
+1. Offer a weekend only annual pass. Have a lower cost than annual pass to incentivize overall more subscriptions    for the more casual residents of Chicago who do not use bikes to commute.
+2. Create guided tour suggestions for people who want to explore the city. 
+
+
+    
